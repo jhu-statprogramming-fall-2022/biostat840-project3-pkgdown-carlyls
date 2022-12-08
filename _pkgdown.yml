@@ -1,0 +1,13 @@
+url: ~
+template:
+  bootstrap: 5
+  bootswatch: lux
+  theme: breeze-light
+  bslib:
+    pkgdown-nav-height: 100px
+    code_font: {google: "Roboto Mono"}
+navbar:
+  structure:
+    left:  [intro, reference, articles]
+    right: [search, github]
+

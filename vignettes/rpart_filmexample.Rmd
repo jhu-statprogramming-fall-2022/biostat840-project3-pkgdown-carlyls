@@ -1,0 +1,208 @@
+---
+title: 'Rpart Example: Predicting Horror Film Ratings'
+author: "Carly Lupton-Smith"
+date: '2022-12-07'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this vignette, we will be displaying an example of rpart applied to a dataset of horror films. The data contains information about the film genre, release date, reviews, run time, case, budget, etc. We will be using rpart to develop a model that predicts rating based on some factors of the movie. We are therefore working to answer the question, what factors of horror movies make them more likely to have a good rating?
+
+This data can be found at: https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-10-22. This link also contains a data dictionary. 
+
+```{r, message=F, warning=F}
+current_wd <- getwd()
+if (file.exists("data")) {
+  setwd(file.path(current_wd, "data"))
+} else {
+  dir.create(file.path(current_wd, "data"))
+  setwd(file.path(current_wd, "data"))
+}
+
+if (file.exists("horror_films.csv")) {
+  horror_films <- readr::read_csv("horror_films.csv")
+} else {
+  horror_films <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-22/horror_movies.csv")
+  readr::write_csv(horror_films, "horror_films.csv")
+}
+```
+
+We can first get a glimpse of the data and the distribution of the film ratings. We will be removing any films without a rating.
+
+```{r message=F, warning=F}
+library(tidyverse)
+library(rpart)
+
+horror_films <- horror_films %>% filter(is.na(review_rating)==F)
+glimpse(horror_films)
+horror_films %>%
+  ggplot(aes(x=review_rating)) +
+  geom_histogram(bins=20, color="black", fill="white") +
+  labs(title = "Histogram of Film Ratings",
+       subtitle = "Horror Films from IMDB",
+       caption = "Films were released between 2012-2017") +
+  xlab("Rating") + ylab("Number of Films")
+```
+
+## Pre-Processing Variables
+
+The variables that seem most relevant to our outcome of review rating are genre, release year, release country, movie rating, movie run time, and budget.
+
+```{r}
+perc_mis <- function(var) {
+  variable <- select(horror_films, {{var}})
+  percent_na <- round(sum(is.na(variable))/nrow(variable)*100,1)
+  return(percent_na)
+}
+mis <- map_dbl(.x = list("genres","release_date","release_country",
+                  "movie_rating","movie_run_time","budget"),
+        .f = perc_mis)
+names(mis) <- c("genres","release_date","release_country",
+                  "movie_rating","movie_run_time","budget")
+print(mis)
+```
+
+From the above missingness percentages, we see that there is very high missingness for movie rating and budget. From this information, it might make most sense to focus on the remaining four variables.
+
+Now we will perform some pre-processing on the remaining variables.
+
+```{r}
+pattern_detect <- function(pattern) {
+  setNames(data.frame(sum(str_detect(horror_films$genres, pattern))), pattern)
+}
+genre <- map_dfc(.x=c("Drama","Romance","Comedy","Horror","Mystery",
+                "Thriller","Fantasy","War","Action","Adventure",
+                "Sci-Fi","Western","Crime","Family","Animation",
+                "Sport","History","Biography","Adult","Musical"),
+        .f=pattern_detect)
+print(genre)
+
+genre_t <- t(genre) %>% data.frame()
+names(genre_t) <- "Number"
+genre_t %>%
+  filter(Number >= 20) %>%
+  rownames_to_column("Genre") %>%
+  ggplot(aes(x=reorder(Genre,-Number), y=Number)) +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle=45)) +
+  xlab("Genre") + ylab("Number of Films") +
+  labs(title = "Number of Films with each Genre Label",
+       subtitle = "Horror Films from IMDB",
+       caption = "Films could have more than one genre; genres with less than 20 films are excluded")
+```
+
+We can see that there are many genres that only appear in a small percentage of the films, and that all films are marked as Horror. Let's create a couple of new variables that break down the more popular genres: thriller, drama, comedy, and mystery.
+
+```{r message=F, warning=F}
+library(lubridate)
+horror_rel <- horror_films %>%
+  mutate(release_year = ifelse(release_date %in% c("2012","2013","2014",
+                                                   "2015","2016","2017"),
+                               release_date,
+                               year(dmy(release_date))),
+         release_year = as.numeric(release_year),
+         release_country = factor(ifelse(release_country == "USA", "USA", "Other")),
+         genre_thriller = ifelse(str_detect(genres, "Thriller"), 1, 0),
+         genre_drama = ifelse(str_detect(genres, "Drama"), 1, 0),
+         genre_comedy = ifelse(str_detect(genres, "Comedy"), 1, 0),
+         genre_mystery = ifelse(str_detect(genres, "Mystery"), 1, 0),
+         movie_run_time = str_remove(movie_run_time, " min"),
+         movie_run_time = as.numeric(movie_run_time))
+```
+
+As one more step of descriptively investigating the data, let's look at the distribution of review ratings across each year.
+
+```{r}
+horror_rel %>%
+  ggplot(aes(x=factor(release_year), y=review_rating)) +
+  geom_boxplot() +
+  xlab("Movie Release Year") + ylab("Rating") +
+  labs(title = "Distribution of Movie Ratings by Release Years",
+       subtitle = "2012-2017",
+       caption = "Horror films only")
+```
+
+We can see there do not seem to be major differences in the distributions, but there might be a slight upward trend.
+
+Finally, one last plot dives into movie run time based on genre. We see here that there do not seem to be major differences in the distribution of run time depending on the movie genre.
+
+```{r warning=F}
+horror_rel %>%
+  filter(xor(genre_drama == 1, genre_comedy == 1)) %>%
+  mutate(DorC = ifelse(genre_drama==1, "Horror-Drama", "Horror-Comedy")) %>%
+  ggplot(aes(x=movie_run_time)) +
+  geom_histogram(bins=30, color="black", fill="white") +
+  facet_wrap(~DorC, nrow=2) +
+  xlab("Movie Run Time") + ylab("Number of Films") +
+  labs(title = "Movie Run Time Distribution based on Genre",
+       subtitle = "Horror-Comedy versus Horror-Drama",
+       caption = "Removed movies that were both drama and comedy")
+```
+
+
+## Rpart
+
+Now we will demonstrate how to use rpart. We will create a training and testing set, fit the model, prune it, and interpret the output and estimate the testing error.
+
+```{r}
+library(rsample)
+split <- initial_split(horror_rel, prop=3/4)
+train <- training(split)
+test <- testing(split)
+```
+
+Now we fit the model.
+
+```{r}
+set.seed(2)
+fit <- rpart(review_rating ~ movie_run_time + release_country + release_year +
+               genre_thriller + genre_drama + genre_comedy + genre_mystery,
+             data = train)
+```
+
+Now we will prune the model.
+
+```{r}
+printcp(fit)
+set.seed(2)
+pfit <- prune(fit, cp=fit$cptable[which.min(fit$cptable[,"xerror"]), "CP"])
+```
+
+Now we will investigate our resulting model.
+
+```{r}
+library(rpart.plot)
+rpart.plot(pfit)
+#post(pfit, file = "resulting_tree.pdf",
+#     title = "Pruned Regression Tree for Movie Rating")
+```
+
+```{r}
+test_pred <- predict(pfit, test)
+# test %>%
+#   bind_cols(pred_rating = test_pred) %>%
+#   ggplot(aes(x=review_rating, y=pred_rating)) +
+#   geom_point() +
+#   geom_abline(slope=1, intercept=0) +
+#   xlab("True Rating") + ylab("Predicted Rating")
+print(paste("The MSE for the testing data is", 
+            round(mean((test$review_rating - test_pred)^2),2)))
+```
+
+We can see that we have pretty high MSE in our testing dataset, considering that the range of the ratings is from 1-10. This indicates that it would be worth exploring other variables to better model horror movie ratings. In the model that we do have here, we see that the tree splits on movie run time and release year, where movies that are longer have a higher average rating. For movies that are less than the cutoff, the movies that were released earlier have a lower average rating than movies released later.
+
+
+
+
+
+## Functions Used
+
+Tidyverse/lubridate: (1) glimpse, (2) mutate, (3) select, (4) filter, (5) year, (6) dmy, (7) str_detect, etc.
+Purrr: (1) map_dbl, (2) map_int
+Ggplot: (1) geom_histogram, (2) geom_bar, (3) geom_boxplot
+Rpart: (1) rpart, (2) prune, etc.
