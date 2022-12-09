@@ -6,7 +6,7 @@
 
 Original package Github link: <https://github.com/bethatkinson/rpart>
 
-Deployed website link:
+Deployed website link: https://jhu-statprogramming-fall-2022.github.io/biostat840-project3-pkgdown-carlyls/
 
 5 customizations to website: (1) Bootswatch theme (lux), (2) Code font (Roboto Mono), (3) Navigation bar height (100px), (4) Navigation bar structure, (5) Color for syntax highlighting (breeze-light).
 
